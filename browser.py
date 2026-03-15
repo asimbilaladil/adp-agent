@@ -365,9 +365,8 @@ class ADPAgent:
                 log.info("  Gmail login submitted")
                 time.sleep(5)
 
-            # Search by sender within a 2-minute window
-            after_str  = (datetime.now() - timedelta(minutes=2)).strftime("%Y/%m/%d %H:%M")
-            query      = f"from:SecurityServices_NoReply@adp.com after:{after_str}"
+            # Search by sender only - no time filter
+            query      = "from:SecurityServices_NoReply@adp.com"
             search_url = f"https://mail.google.com/mail/u/0/#search/{urllib.parse.quote(query)}"
             log.info(f"  Gmail search: {query}")
             gmail_page.goto(search_url, wait_until="domcontentloaded", timeout=90000)
