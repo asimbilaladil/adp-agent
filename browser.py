@@ -44,15 +44,32 @@ class ADPAgent:
         os.makedirs(RESUME_DOWNLOAD_DIR, exist_ok=True)
         os.makedirs(BROWSER_PROFILE_DIR, exist_ok=True)
 
-        args = ["--start-maximized", "--disable-blink-features=AutomationControlled"]
+        args = [
+            "--start-maximized",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--window-size=1366,768",
+            "--lang=en-US,en",
+        ]
         if EXTENSION_PATH and os.path.isdir(EXTENSION_PATH):
             args += [f"--load-extension={EXTENSION_PATH}",
                      f"--disable-extensions-except={EXTENSION_PATH}"]
 
         launch_kwargs = dict(
-            headless=False, args=args, viewport=None, no_viewport=True,
-            slow_mo=200, accept_downloads=True,
-            downloads_path=RESUME_DOWNLOAD_DIR, timeout=60000,
+            headless=True,
+            args=args,
+            viewport={"width": 1366, "height": 768},
+            proxy={"server": "http://23.95.150.145:6114", "username": "hobbrzyi", "password": "xnzemea2ibi6"},
+            slow_mo=200,
+            accept_downloads=True,
+            downloads_path=RESUME_DOWNLOAD_DIR,
+            timeout=60000,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            ignore_https_errors=True,
+            bypass_csp=True,
         )
 
         for attempt in range(1, 3):
@@ -69,6 +86,15 @@ class ADPAgent:
                 log.error(f"Browser launch failed: {e}")
 
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
+
+        # Mask automation fingerprint
+        self.page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            window.chrome = {runtime: {}};
+        """)
+
         log.info("Browser ready.")
 
     def stop(self):
@@ -287,13 +313,21 @@ class ADPAgent:
     def _fetch_adp_code_from_gmail(self, max_wait=120):
         log.info("  Opening Gmail...")
         adp_page   = self.page
-        gmail_page = self.context.new_page()
         start_time = time.time()
         code       = None
 
+        # Open Gmail in a separate context WITHOUT proxy for faster loading
+        gmail_context = self.pw.chromium.launch_persistent_context(
+            user_data_dir=str(BROWSER_PROFILE_DIR) + "_gmail",
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"],
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        )
+        gmail_page = gmail_context.new_page()
+
         try:
             gmail_page.goto("https://mail.google.com/",
-                            wait_until="domcontentloaded", timeout=30000)
+                            wait_until="domcontentloaded", timeout=90000)
             time.sleep(3)
 
             # Login to Gmail if needed
@@ -336,7 +370,7 @@ class ADPAgent:
             query      = f"from:SecurityServices_NoReply@adp.com after:{after_str}"
             search_url = f"https://mail.google.com/mail/u/0/#search/{urllib.parse.quote(query)}"
             log.info(f"  Gmail search: {query}")
-            gmail_page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
+            gmail_page.goto(search_url, wait_until="domcontentloaded", timeout=90000)
 
             while time.time() - start_time < max_wait:
                 time.sleep(5)
@@ -367,7 +401,10 @@ class ADPAgent:
         except Exception as e:
             log.error(f"  Gmail error: {e}")
         finally:
-            gmail_page.close()
+            try:
+                gmail_context.close()
+            except Exception:
+                pass
             self.page = adp_page
             adp_page.bring_to_front()
 
