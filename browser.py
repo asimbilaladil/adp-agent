@@ -339,9 +339,17 @@ class ADPAgent:
                       for part in msg.walk():
                           if part.get_content_type() == "text/plain":
                               body += part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                          elif part.get_content_type() == "text/html" and not body:
+                              html = part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                              # Strip HTML tags to get plain text
+                              body = re.sub(r'<[^>]+>', ' ', html)
                   else:
-                      body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
-  
+                      raw_body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
+                      if "<html" in raw_body.lower():
+                          body = re.sub(r'<[^>]+>', ' ', raw_body)
+                      else:
+                          body = raw_body
+                  
                   # Find 6-digit code
                   code_match = re.search(r'\b(\d{6})\b', body)
                   if not code_match:
