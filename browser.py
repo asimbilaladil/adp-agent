@@ -9,7 +9,7 @@ ADPAgent handles:
   - Screenshot helpers
 """
 import time, os, glob, shutil, re, logging, urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime
 
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
