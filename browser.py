@@ -311,104 +311,63 @@ class ADPAgent:
         return True
 
     def _fetch_adp_code_from_gmail(self, max_wait=120):
-        log.info("  Opening Gmail...")
-        adp_page   = self.page
-        start_time = time.time()
-        code       = None
-
-        # Open Gmail in a separate context WITHOUT proxy for faster loading
-        gmail_context = self.pw.chromium.launch_persistent_context(
-            user_data_dir=str(BROWSER_PROFILE_DIR) + "_gmail",
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"],
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        )
-        gmail_page = gmail_context.new_page()
-
-        try:
-            gmail_page.goto("https://mail.google.com/",
-                            wait_until="domcontentloaded", timeout=90000)
-            time.sleep(3)
-
-            # Login to Gmail if needed
-            if "signin" in gmail_page.url or "accounts.google" in gmail_page.url:
-                log.info("  Logging into Gmail...")
-                for sel in ["input[type='email']", "#identifierId"]:
-                    try:
-                        f = gmail_page.wait_for_selector(sel, timeout=5000)
-                        if f and f.is_visible(): f.fill(GMAIL_ADDRESS); break
-                    except PlaywrightTimeout:
-                        continue
-
-                for sel in ["#identifierNext", "button:has-text('Next')"]:
-                    try:
-                        b = gmail_page.locator(sel).first
-                        if b.is_visible(timeout=3000): b.click(); break
-                    except Exception:
-                        continue
-                time.sleep(3)
-
-                for sel in ["input[type='password']", "input[name='Passwd']"]:
-                    try:
-                        f = gmail_page.wait_for_selector(sel, timeout=10000)
-                        if f and f.is_visible(): f.fill(GMAIL_PASSWORD); break
-                    except PlaywrightTimeout:
-                        continue
-
-                for sel in ["#passwordNext", "button:has-text('Next')"]:
-                    try:
-                        b = gmail_page.locator(sel).first
-                        if b.is_visible(timeout=3000): b.click(); break
-                    except Exception:
-                        continue
-
-                log.info("  Gmail login submitted")
-                time.sleep(5)
-
-            # Search by sender only - no time filter
-            query      = "from:SecurityServices_NoReply@adp.com"
-            search_url = f"https://mail.google.com/mail/u/0/#search/{urllib.parse.quote(query)}"
-            log.info(f"  Gmail search: {query}")
-            gmail_page.goto(search_url, wait_until="domcontentloaded", timeout=90000)
-
-            while time.time() - start_time < max_wait:
-                time.sleep(5)
-                try:
-                    gmail_page.wait_for_selector("tr.zA", timeout=10000)
-                except PlaywrightTimeout:
-                    log.info("  No email yet, refreshing...")
-                    gmail_page.reload(); continue
-
-                first_email = gmail_page.locator("tr.zA").first
-                if not first_email.is_visible():
-                    log.info("  Waiting for email..."); gmail_page.reload(); continue
-
-                first_email.click()
-                time.sleep(3)
-                body_text  = gmail_page.inner_text("div[role='main']")
-                code_match = re.search(r'\b(\d{6})\b', body_text)
-
-                if not code_match:
-                    log.info("  No 6-digit code found, refreshing...")
-                    gmail_page.go_back(); time.sleep(2); gmail_page.reload(); continue
-
-                code = code_match.group(1)
-                log.info(f"  [OK] Found code: {code}")
-                self._delete_gmail_email(gmail_page)
-                break
-
-        except Exception as e:
-            log.error(f"  Gmail error: {e}")
-        finally:
-            try:
-                gmail_context.close()
-            except Exception:
-                pass
-            self.page = adp_page
-            adp_page.bring_to_front()
-
-        return code
-
+      log.info("  Fetching verification code via IMAP...")
+      import imapclient, email as emaillib
+      start_time = time.time()
+  
+      while time.time() - start_time < max_wait:
+          try:
+              with imapclient.IMAPClient("imap.gmail.com", ssl=True) as client:
+                  client.login(GMAIL_ADDRESS, GMAIL_PASSWORD)
+                  client.select_folder("INBOX")
+  
+                  # Search for ADP security email
+                  messages = client.search(["FROM", "SecurityServices_NoReply@adp.com"])
+                  if not messages:
+                      log.info("  No ADP email yet, waiting...")
+                      time.sleep(5)
+                      continue
+  
+                  # Get the latest one
+                  data = client.fetch(messages[-1], ["RFC822"])
+                  raw = data[messages[-1]][b"RFC822"]
+                  msg = emaillib.message_from_bytes(raw)
+  
+                  # Extract body
+                  body = ""
+                  if msg.is_multipart():
+                      for part in msg.walk():
+                          if part.get_content_type() == "text/plain":
+                              body += part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                  else:
+                      body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
+  
+                  # Find 6-digit code
+                  code_match = re.search(r'\b(\d{6})\b', body)
+                  if not code_match:
+                      log.info("  No code in email yet, waiting...")
+                      time.sleep(5)
+                      continue
+  
+                  code = code_match.group(1)
+                  log.info(f"  [OK] Found code via IMAP: {code}")
+  
+                  # Delete the email
+                  try:
+                      client.set_flags(messages[-1], [imapclient.DELETED])
+                      client.expunge()
+                      log.info("  Deleted ADP email")
+                  except Exception:
+                      pass
+  
+                  return code
+  
+          except Exception as e:
+              log.error(f"  IMAP error: {e}")
+              time.sleep(5)
+  
+      log.error("[X] Could not get verification code via IMAP!")
+      return None
     def _delete_gmail_email(self, gmail_page):
         deleted = False
         try:
