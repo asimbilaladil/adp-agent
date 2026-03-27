@@ -62,7 +62,7 @@ class ADPAgent:
             headless=True,
             args=args,
             viewport={"width": 1366, "height": 768},
-            proxy={"server": "http://23.95.150.145:6114", "username": "hobbrzyi", "password": "xnzemea2ibi6"},
+            #proxy={"server": "http://23.95.150.145:6114", "username": "hobbrzyi", "password": "xnzemea2ibi6"},
             slow_mo=200,
             accept_downloads=True,
             downloads_path=RESUME_DOWNLOAD_DIR,
