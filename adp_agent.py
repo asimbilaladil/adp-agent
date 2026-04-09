@@ -1,40 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-ADP Candidate Agent v5
-========================
-Entry point. Reads candidates from Google Sheets,
-drives the ADP browser agent, updates sheet status.
 
-Run:
-    python adp_agent.py
-
-Dependencies:
-    pip install playwright gspread google-auth python-dotenv
-    playwright install chromium
-"""
 import time
 import logging
 import os
 import json
 
-from sheets  import read_candidates, update_status
 from browser import ADPAgent
 from config  import RESUME_DOWNLOAD_DIR
+from backend import get_pending_candidates, update_candidate
 
 log = logging.getLogger("adp_agent")
 
 
 def main():
     print("\n" + "=" * 50)
-    print("  ADP Candidate Agent v5 (Google Sheets mode)")
-    print("  Login + 2FA + Search + Resume Download")
+    print("  ADP Candidate Agent (Backend API mode)")
     print("=" * 50 + "\n")
 
-    candidates = read_candidates()
+    # 🔥 Fetch from backend instead of sheets
+    candidates = get_pending_candidates()
+
     if not candidates:
-        print("No pending candidates to process. Exiting.")
-        # Still emit a valid JSON result so server.py can parse it
+        print("No pending candidates to process.")
         print("__RESULT__:" + json.dumps({
             "processed": [],
             "not_found": [],
@@ -43,83 +31,104 @@ def main():
         }))
         return
 
-    print(f"{len(candidates)} pending candidate(s):")
-    for i, c in enumerate(candidates, 1):
-        print(f"  {i}. {c['candidate_name']}  ->  {c['posting_name']}")
-    print(f"\nResumes will be saved to: {RESUME_DOWNLOAD_DIR}\n")
+    print(f"{len(candidates)} pending candidate(s)\n")
 
-    # Track results for structured output
-    processed = []   # {"candidate": ..., "file": ..., "path": ...}
-    not_found = []   # candidate names
-    errors    = []   # candidate names
+    processed = []
+    not_found = []
+    errors    = []
 
     agent = ADPAgent()
+
     try:
         agent.start()
 
         if not agent.login():
-            log.warning("Login may have failed - check browser window")
+            log.warning("Login issue detected")
+
         time.sleep(3)
 
         if not agent.go_to_candidates():
-            log.warning("Could not reach Candidates tab automatically.")
+            log.warning("Candidates tab not reached")
 
         for i, cand in enumerate(candidates, 1):
-            name     = cand["candidate_name"]
-            email_id = cand["email_id"]
+
+            name     = cand["candidateName"]
+            email_id = cand["emailId"]
+
             print(f"\n-- [{i}/{len(candidates)}] {name} --")
 
             try:
                 if agent.search(name):
+
                     resume_path = agent.download_resume(name, email_id)
+
                     if resume_path:
                         filename = os.path.basename(resume_path)
+
                         processed.append({
                             "candidate": name,
-                            "file":      filename,
-                            "path":      resume_path,
+                            "file": filename,
+                            "path": resume_path,
                         })
-                        update_status(cand["_row"], f"Processed - Resume: {filename}")
+
+                        # ✅ Update backend
+                        update_candidate(email_id, {
+                            "status": "processed",
+                            "aiScore": 0,
+                            "aiRecommendation": "PENDING",
+                            "aiSummary": f"Resume downloaded: {filename}"
+                        })
+
                     else:
                         processed.append({
                             "candidate": name,
-                            "file":      None,
-                            "path":      None,
+                            "file": None,
+                            "path": None,
                         })
-                        update_status(cand["_row"], "Processed - No Resume")
+
+                        update_candidate(email_id, {
+                            "status": "processed",
+                            "aiRecommendation": "PENDING",
+                            "aiSummary": "No resume found"
+                        })
+
                     agent.clear_search()
+
                 else:
                     not_found.append(name)
-                    update_status(cand["_row"], "Not Found")
+
+                    update_candidate(email_id, {
+                        "status": "not_found",
+                        "aiRecommendation": "REJECT",
+                        "aiSummary": "Candidate not found in ADP"
+                    })
 
             except Exception as e:
                 errors.append(name)
-                log.error(f"  Error processing {name}: {e}")
-                update_status(cand["_row"], "Error")
+                log.error(f"Error processing {name}: {e}")
+
+                update_candidate(email_id, {
+                    "status": "error",
+                    "aiRecommendation": "REJECT",
+                    "aiSummary": str(e)
+                })
 
             agent.screenshot(f"candidate_{i}")
+
             if i < len(candidates):
                 time.sleep(2)
 
-        downloaded = sum(1 for p in processed if p["file"])
-        print(f"\n{'=' * 50}")
-        print(f"  Done!")
-        print(f"  Found: {len(processed)}  |  Not Found: {len(not_found)}  |  Errors: {len(errors)}")
-        print(f"  Resumes downloaded: {downloaded}")
-        print(f"  Saved to: {RESUME_DOWNLOAD_DIR}")
-        print(f"{'=' * 50}")
-
-    except KeyboardInterrupt:
-        print("\nStopped by user.")
     finally:
         agent.stop()
 
-    # Emit structured result as the last line — server.py parses this
+    print("\nDone.")
+
+    # ✅ IMPORTANT: server.py depends on this format
     print("__RESULT__:" + json.dumps({
-        "processed":   processed,
-        "not_found":   not_found,
-        "errors":      errors,
-        "resume_dir":  RESUME_DOWNLOAD_DIR,
+        "processed": processed,
+        "not_found": not_found,
+        "errors": errors,
+        "resume_dir": RESUME_DOWNLOAD_DIR,
     }))
 
 
