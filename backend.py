@@ -19,9 +19,9 @@ def get_pending_candidates():
     return res.json().get("data", [])
 
 
-def update_candidate(email_id, payload):
+def update_status(email_id, payload):
     res = requests.patch(
-        f"{BASE_URL}/api/candidates/{email_id}/ai-review",
+        f"{BASE_URL}/api/candidates/{email_id}/status",
         json=payload,
         headers=HEADERS
     )
