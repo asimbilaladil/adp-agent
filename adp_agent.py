@@ -8,7 +8,7 @@ import json
 
 from browser import ADPAgent
 from config  import RESUME_DOWNLOAD_DIR
-from backend import get_pending_candidates, update_candidate
+from backend import get_pending_candidates, update_status
 
 log = logging.getLogger("adp_agent")
 
