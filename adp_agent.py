@@ -72,11 +72,9 @@ def main():
                         })
 
                         # ✅ Update backend
-                        update_candidate(email_id, {
+                        update_status(email_id, {
                             "status": "processed",
-                            "aiScore": 0,
-                            "aiRecommendation": "PENDING",
-                            "aiSummary": f"Resume downloaded: {filename}"
+                            "resumeUrl": resume_path
                         })
 
                     else:
@@ -86,10 +84,8 @@ def main():
                             "path": None,
                         })
 
-                        update_candidate(email_id, {
-                            "status": "processed",
-                            "aiRecommendation": "PENDING",
-                            "aiSummary": "No resume found"
+                        update_status(email_id, {
+                            "status": "not_found"
                         })
 
                     agent.clear_search()
@@ -97,20 +93,16 @@ def main():
                 else:
                     not_found.append(name)
 
-                    update_candidate(email_id, {
-                        "status": "not_found",
-                        "aiRecommendation": "REJECT",
-                        "aiSummary": "Candidate not found in ADP"
+                    update_status(email_id, {
+                        "status": "not_found"
                     })
 
             except Exception as e:
                 errors.append(name)
                 log.error(f"Error processing {name}: {e}")
 
-                update_candidate(email_id, {
-                    "status": "error",
-                    "aiRecommendation": "REJECT",
-                    "aiSummary": str(e)
+                update_status(email_id, {
+                    "status": "error"
                 })
 
             agent.screenshot(f"candidate_{i}")
